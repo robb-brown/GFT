@@ -11,4 +11,6 @@ to see a demo of the 1-dimensional forward and inverse fast ST.
 
 The GFT and this efficient algorithm for computing it was published in 2009 in IEEE Transactions on Signal Processing. The full text is available [here](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=5184926&casa_token=-wdb__eqE3EAAAAA:XheUu232GAVUPrMsvwAdFBZH_2wyUkcpV9aPtt4G10Ay-CaH3D-Hk07XVW7xttm4XjsRFRcK_w).
 
+A previous Python/C version of the GFT was hosted at [sourceforge.net/projects/fst-uofc/](https://sourceforge.net/projects/fst-uofc/). That project is no longer maintained.
+
 The O(n log n) algorithm is the subject of US [patent US8458240B2](https://patents.google.com/patent/US8458240B2/en).
