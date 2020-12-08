@@ -1,0 +1,11 @@
+.DS_Store
+*/.DS_Store
+__pycache__
+__pycache__/*
+*.pyc
+*.tmproj
+todo.txt
+temp
+temp/*
+old
+old/*
