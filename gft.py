@@ -1,175 +1,102 @@
-from math import *
-from numpy import *
-from numpy.fft import *
-from matplotlib.pylab import *
-from time import *
+import numpy, scipy.interpolate
 
-ion()
-
-def shift(a,nx):
-	nx = -int(round(nx))
-	b = concatenate((a[nx:],a[0:nx]))
-	return b
-
-def downsampleft(a,factor):
-	if (factor < 2): return a
-	A = fft(a)
-	N = len(A)
-	return ifft(concatenate((A[0:N//(2*factor)],A[N-N//(2*factor):N+1])))
-
-def fourierKernel(signal,k):
-	x = arange(0,1,1./len(signal)).astype(complex64)
-	ker = e**(1j*2*pi*k*x)
-	return ker
-
-def window(signal,t,k):
-	l = len(signal)
-	x = arange(0,1,1./l).astype(complex64)
-	win = 1*abs(k)/sqrt(2*pi)*e**(-(x-0.5)**2*abs(k)**2/2.)
-	win = win/(sum(win))
-	win = shift(win,-l//2)
-	win = shift(win,t)
-	return win
-
-
-def boxedWindow(signal,t,k,width):
-	l = len(signal)
-	k = float(k)
-	x = arange(0,1,1./l).astype(complex64)
-	win = 1*abs(k)/sqrt(2*pi)*e**(-(x-0.5)**2*abs(k)**2/2.)
-	sigma = l/k
-	w = int(round(sigma*width))
-	if (w*2) < l:
-		if (t == 0): print("Width: %d" % w)
-		win[0:l//2-w] = 0
-		win[l//2+w:] = 0
-	else:
-		if (t == 0): print("Width: %d" % l)
-	win = win/(sum(win))
-	win = shift(win,-l//2)
-	win = shift(win,t)
-	return win
-
-
-def plotc(sig,color='b',prefix='',**args):
-	plot(sig.real,'%c-' % color,label=prefix+'Real',**args); plot(sig.imag,'%c--' % color,label=prefix+'Imaginary',**args)
-
-
+class GFTPartitions(object):
+	""" Superclass for GFT window sets. Implements generic boxcar octave windows."""
+	
+	@classmethod 
+	def widths(self,partitions):
+		"""Takes a partitions array and returns the widths of the partitions"""
+		widths = (numpy.roll(partitions,-1) - partitions); widths[-1] += max(partitions)+1
+		return widths
+	
+	@classmethod
+	def windows(self,N):
+		# octave partitions
+		widths = (2**numpy.arange(numpy.round(numpy.log(N)/numpy.log(2))-1)).astype(numpy.uint32)
+		widths = numpy.concatenate([[1],widths,widths[::-1]])
+		partitions = numpy.concatenate([[0],numpy.cumsum(widths)])
+		# Boxcar windows are flat
+		windows = numpy.ones(N)
+		return windows,partitions
+	
+	
 
 class GFT(object):
-	
-	windowmult = 1/0.8
-	windowcut = 16.0
-	
+
 	@classmethod
-	def transform(self,signal,kernel=fourierKernel,window=boxedWindow):
-		transform = []
-		transformn = []
-		sig = array(signal)
-		N = len(signal)
-		
-		k = len(sig) 			# will get divided by 2 before we start
-		
-		while k > 1:
-			k = k // 2
-			M = len(sig)
-			sigma = k*self.windowmult
-			ker = kernel(sig,k)
-			kern = kernel(sig,-k)
-			print("k= %d  M= %d" % (k,M))
-			sk = sig*ker
-			skn = sig*kern
-			line = []
-			linen = []
-			for i in range(0,M):
-				win = window(sig,i,sigma,self.windowcut)				
-				line.append(sum(sk*win))		
-				linen.append(sum(skn*win))
-
-			transform.append(line)
-			transformn.append(linen)
-			if (k <= N//4 and M > 2):
-				sig = downsampleft(sig,2)
-		transform.append([sum(sig)])
-		return (transform,transformn)
-
-	@classmethod		
-	def invert(self,transform,kernel=fourierKernel,window=boxedWindow):
-		trans = transform[0]
-		transn = transform[1]
-		N = len(trans[0])
-		M = len(trans)
-		SIG = zeros(N,complex64)
-			
-		dk = N//4
-		k = N//2
-		pSIG = k
-		pT = 0
-		while (pT <= M-2):
-			t = array(trans[pT])
-			tn = array(transn[pT])
-			win = window(t,0,k*self.windowmult,self.windowcut)
-
-			WIN = fft(win)
-			print("Line %d: k=%d dk= %d, pSIG= %d to %d, %d to %d" % (pT,k,dk,pSIG,pSIG-dk,-pSIG,-pSIG+dk))
-			for i in range(0,dk+1):
-				kernelcorrection = kernel(t,-i)
-				kernelcorrectionn = kernel(t,i)
-				windowcorrection = WIN[i]
-				SIG[pSIG-i] = sum(t*kernelcorrection)/windowcorrection
-				SIG[-pSIG+i] = sum(tn*kernelcorrectionn)/windowcorrection
-			pT += 1
-			pSIG -= dk
-			dk //= 2
-			k //= 2
-		SIG[0] = sum(trans[len(trans)-1])				#	DC		
+	def transform(self,signal,windows,partitions):
+		SIG = numpy.fft.fft(signal)
+		SIG *= windows
+		for p in range(len(partitions)-1):
+			SIG[partitions[p]:partitions[p+1]] = numpy.fft.ifft(SIG[partitions[p]:partitions[p+1]])
 		return SIG
-
-	
+		
 	@classmethod
-	def interpolate(self,transform):
-		N = len(transform[0])
-		t = zeros((N//2,N),complex64)
-		end = 0
-		dk = len(transform[0]) // 4
-		if (dk < 1): dk = 1
-		for i in range(0,len(transform)):
-			start = end
-			end = start+dk
-			t[start:end,:] = repeat(array(transform[i]),N//len(transform[i]))
+	def invert(self,SIGNAL,windows,partitions):
+		SIG = numpy.array(SIGNAL)
+		for p in range(len(partitions)-1):
+			SIG[partitions[p]:partitions[p+1]] = numpy.fft.fft(SIG[partitions[p]:partitions[p+1]])
+		SIG /= windows
+		return numpy.fft.ifft(SIG)
 
-			# Modify spectral weighting
-			t[start:end,:] = t[start:end,:] * (len(transform[i]))			
-			
-			dk //= 2
-		return t
+	def interpolate(SIG,partitions,M=None,axes=None,kind='linear',**args):
+		""" Interpolate a 1D GFT onto a grid. If axes is specified it should be a
+			list or tuple consisting of two arrays, the sampling points on the time and frequency
+			axes, respectively. Alternatively, M can be specified, which gives the number
+			of points along each axis."""
+		N = len(SIG)
+		M = M if not M is None else N
+		factor = N / M
+		axes = [numpy.arange(0,N,factor),numpy.arange(0,N,factor)] if axes is None else axes
+		newT = axes[0]		# New t axis
+		widths = GFTPartitions.widths(partitions)
+		spectrogram = []
+		# interpolate each frequency band in time
+		for p in range(len(partitions)):
+			# indices of sample points, plus 3 extra on each side in case of cubic interpolation
+			indices = (numpy.arange(-3,widths[p]+3))
+			# time coordinates of samples
+			t = indices * (N/widths[p])
+			# values at sample points; indices can index multiple times into SIG[]
+			f = SIG[partitions[p]:partitions[p+1]][indices % widths[p]] if p < len(partitions)-1 else SIG[partitions[p]:][indices % widths[p]]
+			spectrogram.append(scipy.interpolate.interp1d(t,f,kind=kind,**args)(newT) if len(f) > 1 else f)
+		
+		spectrogram = numpy.array(spectrogram)
+		
+		# Interpolate in frequency
+		newF = axes[1]		# New f axis
+		indices = numpy.arange(-3,len(partitions)+3) % len(partitions)
+		f = partitions[indices] + widths[indices]/2; f[0:3] -= N; f[-3:] += N
+		t = spectrogram[indices]
+		spectrogram = scipy.interpolate.interp1d(f,t,axis=0,kind=kind,**args)(newF)
+		return spectrogram
 
 
 
-if (__name__ == '__main__'):
+# ****** Main ***********
+from pylab import *; ion()
+import PyGFT as gft
+numpy.set_printoptions(precision=4,suppress=True)
+N = 256
+x = numpy.arange(N); sig = numpy.zeros(N,dtype=numpy.complex64); sig[N//2] = 1.0
 
-	rc('figure',facecolor='w')
-	
-	# Create a fake signal
-	N = 256
-	x = arange(0,1,1./N)
-	sig = zeros(len(x),complex64)
-	sig[0:N//2] += (sin((N/16)*2*pi*x)*1.0)[0:N//2]
-	sig[N//2:N] += (cos((N/8)*2*pi*x)*1.0)[N//2:N]
-	sig[2*N//16:3*N//16] += (sin((N//4)*2*pi*x)*1.0)[2*N//16:3*N//16]
-	sig[N//2+N//4] = 2.0
+windows,partitions = GFTPartitions.windows(N)
+SIG = GFT.transform(sig,windows,partitions)
+SIG1 = gft.gft1d(sig,'box')
 
-	# Do the fast ST... it returns the postive and negative parts separately
-	ST = GFT.transform(sig)
-	
-	# Interpolate the postive part to make a spectrogram
-	STi = GFT.interpolate(ST[0])
-	figure('Fast ST Spectrogram'); imshow(abs(STi))
-	
-	# Compute the inverse.  Inverse ST is in the frequency domain
-	STInverse = GFT.invert(ST)
-	# inverse FFT and shift to recover the original signal
-	sigST = shift(ifft(STInverse)[::-1],1)
-	figure('Original Signal and Inverted Fast ST'); clf()
-	plotc(sig,prefix='Signal ',color='b',alpha=0.5); plotc(sigST,prefix='Inverted ST ',color='r',alpha=0.5)
-	legend()
+sigR = GFT.invert(SIG,windows,partitions)
+
+fig,ax = subplots(3,1,clear=True,num='Test')
+ax[0].plot(x,sig.real,label='Original Signal',alpha=0.5)
+ax[0].plot(x,sigR.real,label='Recovered Signal',alpha=0.5)
+_ = [ax[1].axvline(p / (N-1) * x.max(),0,1,color='r',alpha=0.5,linestyle='--') for p in partitions]
+ax[1].plot(x,abs(SIG),label='Pure Python',alpha=0.5)
+#ax[1].plot(x,SIG1,label='Cython',alpha=0.5)
+ax[0].legend(); ax[1].legend()
+
+axes = [numpy.arange(0,N),numpy.arange(0,N)]
+spectrogram = GFT.interpolate(SIG,partitions,axes=axes,kind='linear')
+ax[2].imshow(abs(spectrogram),aspect='auto',origin='lower'); ax[2].set_title('Interpolated Spectrogram')
+
+
+

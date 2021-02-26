@@ -1,70 +1,101 @@
 1; % lol. Tells Matlab this is not a single function file
 
-function ker = fourierKernel(signal,k)
-	x = complex(linspace(0,1,length(signal)),0);
-	ker = e.^(1j*2*pi*k*x);
+function partitions = octavePartitions(N)
+	widths = 2.^(0:round(log(N)/log(2)-2));
+	widths = [[1],widths,flip(widths)];
+	partitions = [[0],cumsum(widths)]+1;
 endfunction;
 
-function win = window(signal,t,k)
-	l = length(signal);
-	x = complex(linspace(0,1,l),0);
-	win = 1*abs(k)/sqrt(2*pi)*e.^(-(x-0.5).^2*abs(k).^2/2);
-	win = win./(sum(win));
-	win = shift(win,-l/2);
-	win = shift(win,t);
+function widths = partitionWidths(partitions)
+	widths = [shift(partitions,-1) - partitions];
+	widths(length(partitions)) += max(partitions);
+endfunction
+
+function windows = boxcarWindows(partitions)
+	windows = ones(1,max(partitions));
 endfunction;
 	
-% @ operator creates a pointer to a function
-function gft = GFT(signal,kernel=@fourierKernel,window=@window,windowmult=0.8,windowcut=16)
-	transform = {};
-	transformn = {};
-	sig = signal;
-	N = length(sig);
-	k = length(sig); 			% will get divided by 2 before we start
-	while k > 1
-		k = k / 2;
-		M = length(sig)
-		sigma = k.*self.windowmult;
-		ker = kernel(sig,k);
-		kern = kernel(sig,-k);
-		%printf("k= %d  M= %d" % (k,M))
-		sk = sig.*ker;
-		skn = sig.*kern;
-		line = {}
-		linen = {}
-		for i = 1:M
-			win = window(sig,i,sigma,windowcut);			
-			line[i] = sum(sk.*win);		
-			linen[i] = sum(skn.*win);
-		endfor;
-		transform[length(transform)+1] = line;
-		transformn[length(transformn)+1]] = linen;
-		if (k <= N/4 & M > 2)
-			sig = downsampleft(sig,2);
-		endif;
-	endwhile;
-	transform.append([sum(sig)])
-	return (transform,transformn)
-
-
+function SIG = GFT(sig,partitions,windows)
+	SIG = fft(complex(sig));
+	SIG .*= windows;
+	for p = 1:(length(partitions)-1)
+		SIG(partitions(p):partitions(p+1)-1) = ifft(SIG(partitions(p):partitions(p+1)-1));
+	endfor;
 endfunction;
 
+function spectrogram = interpolateGFT(SIG,partitions,tAxis,fAxis,method='linear')
+	% Interpolate a 1D GFT onto a grid. If axes is specified it should be a
+	% list or tuple consisting of two arrays, the sampling points on the time and frequency
+	% axes, respectively. Alternatively, M can be specified, which gives the number
+	% of points along each axis.
+	N = length(SIG);
+	widths = partitionWidths(partitions);
+	spectrogram = complex(length(partitions),zeros(length(tAxis)));
+	% interpolate each frequency band in time
+	for p = 1:length(partitions)
+		% indices of sample points, plus 3 extra on each side in case of cubic interpolation
+		indices = (-3:widths(p)+2);
+		% time coordinates of samples
+		t = indices .* (N/widths(p));
+		% values at sample points
+		if (p < length(partitions))
+			f = SIG(partitions(p):partitions(p+1)-1)(mod(indices,widths(p))+1);
+		else
+			f = SIG(partitions(p):N)(mod(indices,widths(p))+1);
+		endif
+		if (length(f) > 1)
+			spectrogram(p,:) = interp1(t,f,tAxis,method=method);
+		else
+			spectrogram(p,:) = f;
+		endif
+	endfor
 
-function demo()
+	% Interpolate in frequency
+	indices = mod(-3:length(partitions)+2,length(partitions));
+	f = partitions(indices+1) + widths(indices+1)/2; 
+	f(1:3) -= N; 
+	f(length(f)-2:length(f)) += N;
+	t = spectrogram(indices+1,:);
+	spectrogram = interp1(f,t,fAxis,method=method);
+endfunction
+
+
+% function demo()
 	% Create a fake signal
 	N = 256;
 	x = linspace(0,1,N);
-	sig = zeros(1,length(x),'double');
-	sig(1:N/2) += (sin((N/16)*2*pi*x)*1.0)(1:N/2);
-	sig(N/2:N) += (cos((N/8)*2*pi*x)*1.0)(N/2:N);
-	sig(2*N/16:3*N/16) += (sin((N/4)*2*pi*x)*1.0)(2*N/16:3*N/16);
-	sig(N/2+N/4) = 2.0;
+	sig = zeros(1,length(x));
 	
-	figure(); hold on;
-	plot(x,sig);
-	plot(x,window(sig,N/2,2));
-	plot(x,fourierKernel(sig,2))
+	% signal example 1 (a single delta)
+	sig(N/2) = 1.0;
 	
-	ST = GFT(sig)
-		
-endfunction;
+	% signal example 2 (a mixture of sinusoids and a delta)
+	% sig(1:N/2) += (sin((N/16)*2*pi*x)*1.0)(1:N/2);
+	% sig(N/2+1:N) += (cos((N/8)*2*pi*x)*1.0)(N/2+1:N);
+	% sig(2*N/16+1:3*N/16) += (sin((N/4)*2*pi*x)*1.0)(2*N/16+1:3*N/16);
+	% sig(N/2+N/4+1) = 2.0;
+
+	% Do the transform
+	partitions = octavePartitions(N);
+	windows = boxcarWindows(partitions);
+	SIG = GFT(sig,partitions,windows);
+	
+	% Interpolate to get a spectrogram
+	% The third and fourth parameters set the time and frequency axes respectively,
+	% and can be changed to raise or lower the resolution, or zoom in on
+	% a feature of interest
+	spectrogram = interpolateGFT(SIG,partitions,1:N,1:N);
+	
+	% Display
+	figure(); 
+	subplot(3,1,1);
+	plot(x,sig,';signal;');
+	ax = subplot(3,1,2);
+	hold on;
+	for p = partitions
+		line([x(p),x(p)],[0,max(abs(SIG))],'Color',[1 0 0],'linestyle','--');
+	endfor;
+	plot(x,abs(SIG),';SIGNAL;');
+	subplot(3,1,3);
+	imagesc(abs(spectrogram));
+% endfunction;
