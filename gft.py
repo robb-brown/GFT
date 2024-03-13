@@ -1,5 +1,7 @@
 import numpy, scipy.interpolate, scipy.signal
 
+from numpy.fft import fft, ifft, fftn, ifftn
+
 class GFTPartitions(object):
 	""" Superclass for GFT window sets. Implements generic boxcar octave windows."""
 	
@@ -101,7 +103,7 @@ class GFT(object):
 		spectrogramM = scipy.interpolate.interp1d(f,abs(spectrogramM[indices]),axis=0,kind=kind,**args)(newF)
 		#spectrogram = spectrogramM * (cos(spectrogramP) + 1j*sin(spectrogramP))
 		spectrogramP = scipy.interpolate.interp1d(f,spectrogramP[indices],axis=0,kind=kind,**args)(newF)
-		spectrogram = spectrogramM * (cos(numpy.angle(spectrogramP)) + 1j*sin(numpy.angle(spectrogramP)))
+		spectrogram = spectrogramM * (numpy.cos(numpy.angle(spectrogramP)) + 1j*numpy.sin(numpy.angle(spectrogramP)))
 		return spectrogram
 
 
@@ -133,7 +135,8 @@ def demo1(sig,windowShape='boxcar',interpolation='linear'):
 	spectrogram = GFT.interpolate(SIG,partitions,axes=axes,kind=interpolation)
 
 	# Plot
-	fig,ax = subplots(5,1,clear=True,num=f'GFT Demo, {windowShape} Windows',figsize=(6,8))
+	import pylab; pylab.ion()
+	fig,ax = pylab.subplots(5,1,clear=True,num=f'GFT Demo, {windowShape} Windows',figsize=(6,8))
 	ax[0].plot(sig.real,label='Original Signal',alpha=0.5)
 	ax[0].plot(sigR.real,label='Recovered Signal',alpha=0.5)
 	ax[0].set_xlim(0,N)
@@ -150,7 +153,7 @@ def demo1(sig,windowShape='boxcar',interpolation='linear'):
 	ax[4].imshow(numpy.angle(spectrogram),aspect='auto',origin='lower'); ax[4].set_title('Spectrogram Phase')
 	ax[0].legend(); ax[1].legend(); ax[2].legend()
 	ax[3].set_axis_off(); ax[4].set_axis_off()
-	tight_layout()
+	pylab.tight_layout()
 	
 
 def demoWindows(sig):
@@ -162,10 +165,11 @@ def demoWindows(sig):
 	always have their peak on a sample. Symmetric windows are shifted by half a pixel
 	relative to asymmetric, which manifests as a phase ramp in the S spectrum.
 	"""
+	import pylab; pylab.ion()
 	N = len(sig)
 	axes = [numpy.arange(0,N),numpy.arange(0,N)]
 	partitions = GFTPartitions.dyadicPartitions(N)
-	fig,ax = subplots(4,4,clear=True,num='Demo Windows')
+	fig,ax = pylab.subplots(4,4,clear=True,num='Demo Windows')
 	for r,sigma in enumerate([0.1,0.25,0.5,1000]):
 		for c,symmetric in enumerate([True,False]):
 			windows = GFTPartitions.gaussianWindows(N,partitions,sigma=sigma,symmetric=symmetric)
@@ -174,7 +178,7 @@ def demoWindows(sig):
 			ax[r,c*2].imshow(abs(spectrogram),aspect='auto',origin='lower'); ax[r,c*2].set_title(f'σ = {sigma} {"symmetric" if symmetric else ""}')
 			ax[r,c*2+1].imshow(numpy.angle(spectrogram),aspect='auto',origin='lower'); ax[r,c*2+1].set_title(f'Phase')
 			ax[r,c*2].set_axis_off(); ax[r,c*2+1].set_axis_off()
-	tight_layout()
+	pylab.tight_layout()
 
 
 def signalDelta(N):
@@ -189,24 +193,23 @@ def signalDoubleDelta(N):
 
 def signalTwoTone(N):
 	x = numpy.arange(0,N) / N
-	sig = cos(2*pi*N/12*x)*numpy.roll(scipy.signal.gaussian(N,N/4),-N//4) + \
-			cos(2*pi*N/6*x)*numpy.roll(scipy.signal.gaussian(N,N/4),N//4)
+	sig = numpy.cos(2*pi*N/12*x)*numpy.roll(scipy.signal.gaussian(N,N/4),-N//4) + \
+			numpy.cos(2*pi*N/6*x)*numpy.roll(scipy.signal.gaussian(N,N/4),N//4)
 	return sig
 
 def signalChirp(N):
 	x = numpy.arange(0,N) / N
-	sig = cos(2*pi*N/4*x**2)
+	sig = numpy.cos(2*pi*N/4*x**2)
 	return sig
 
 
-
-
-
-if __name__ == '__main__':
-	from pylab import *; ion()
+def runDemo():
 	numpy.set_printoptions(precision=4,suppress=True)
 	sig = signalDoubleDelta(N = 512)
 	demo1(sig,windowShape='boxcar',interpolation='linear')
 	demo1(sig,windowShape='gaussian',interpolation='linear')
 	demoWindows(sig)
 
+
+if __name__ == '__main__':
+	runDemo()
