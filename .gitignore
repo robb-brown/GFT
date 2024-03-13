@@ -2,6 +2,8 @@
 */.DS_Store
 __pycache__
 __pycache__/*
+*.egg-info
+*.egg-info/*
 *.pyc
 *.tmproj
 todo.txt
@@ -9,3 +11,4 @@ temp
 temp/*
 old
 old/*
+test.py

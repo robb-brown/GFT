@@ -45,6 +45,7 @@ class GFT(object):
 
 	@classmethod
 	def transform2(self,signal,windows,partitions):
+		"""Not sure what this is trying to do. Maybe working on real GFT?"""
 		N = len(signal)
 		widths = GFTPartitions.widths(N,partitions)
 		SIG = numpy.fft.fft(signal)
@@ -105,6 +106,7 @@ class GFT(object):
 
 
 class GFTND(object):
+	""" N dimensional GFT. Work in progress."""
 	
 	@classmethod
 	def transform(self,signal,windows,partitions):
@@ -112,36 +114,38 @@ class GFTND(object):
 
 
 
-def demo1(sig):
+def demo1(sig,windowShape='boxcar',interpolation='linear'):
 	"""Compute and display the GFT for a demo signal"""
 	N = len(sig)
 	# Create the partitions and windows
 	partitions = GFTPartitions.dyadicPartitions(N)
-	windows = GFTPartitions.boxcarWindows(N,partitions)
+	windows = GFTPartitions.boxcarWindows(N,partitions) if windowShape == 'boxcar' else \
+							GFTPartitions.gaussianWindows(N,partitions,sigma=0.25,symmetric=False)
 
 	# Do the GFT
-	SIG = GFT.transform2(sig,windows,partitions)
+	SIG = GFT.transform(sig,windows,partitions)
 	
-	partitions *= 2; partitions = partitions[0:len(partitions)//2]
-
 	# Do the inverse GFT
 	sigR = GFT.invert(SIG,windows,partitions)
 
 	# Interpolate the GFT to get a spectrogram
 	axes = [numpy.arange(0,N),numpy.arange(0,N)]
-	spectrogram = GFT.interpolate(SIG,partitions,axes=axes,kind='linear')
+	spectrogram = GFT.interpolate(SIG,partitions,axes=axes,kind=interpolation)
 
 	# Plot
-	fig,ax = subplots(5,1,clear=True,num='Demo 1',figsize=(6,8))
+	fig,ax = subplots(5,1,clear=True,num=f'GFT Demo, {windowShape} Windows',figsize=(6,8))
 	ax[0].plot(sig.real,label='Original Signal',alpha=0.5)
 	ax[0].plot(sigR.real,label='Recovered Signal',alpha=0.5)
+	ax[0].set_xlim(0,N)
 	_ = [ax[1].axvline(p / (N-1) * N,0,1,color='r',alpha=0.5,linestyle='--') for p in partitions]
 	ax[1].plot(abs(fft(sig)),label='FFT Magnitude',alpha=0.5)
 	ax[1].plot(numpy.angle(fft(sig)),label='FFT Phase',alpha=0.5)
 	ax[1].plot(windows,label='Windows',alpha=0.5)
+	ax[1].set_xlim(0,N)
 	_ = [ax[2].axvline(p / (N-1) * N,0,1,color='r',alpha=0.5,linestyle='--') for p in partitions]
 	ax[2].plot(abs(SIG),label='GFT Magnitude',alpha=0.5)
 	ax[2].plot(numpy.angle(SIG),label='GFT Phase',alpha=0.5)
+	ax[2].set_xlim(0,N)
 	ax[3].imshow(abs(spectrogram),aspect='auto',origin='lower'); ax[3].set_title('Spectrogram Magnitude')
 	ax[4].imshow(numpy.angle(spectrogram),aspect='auto',origin='lower'); ax[4].set_title('Spectrogram Phase')
 	ax[0].legend(); ax[1].legend(); ax[2].legend()
@@ -150,7 +154,14 @@ def demo1(sig):
 	
 
 def demoWindows(sig):
-	"""Show the effect of window selection on the GFT of a demo signal"""
+	"""
+	Show the effect of window selection on the GFT of a demo signal.
+	The width of Gaussian windows is scaled by sigma, demonstrating the tradeoff
+	between frequency and time resolution. The windows are also symmetric or asymmetric;
+	for even N, symmetric Gaussians place their peak between sample points while asymmetric
+	always have their peak on a sample. Symmetric windows are shifted by half a pixel
+	relative to asymmetric, which manifests as a phase ramp in the S spectrum.
+	"""
 	N = len(sig)
 	axes = [numpy.arange(0,N),numpy.arange(0,N)]
 	partitions = GFTPartitions.dyadicPartitions(N)
@@ -170,6 +181,12 @@ def signalDelta(N):
 	sig = numpy.zeros(N,dtype=numpy.complex64); sig[N//2] = 1.0
 	return sig
 
+def signalDoubleDelta(N):
+	sig = numpy.zeros(N,dtype=numpy.complex64); 
+	sig[N//4] = 1.0; sig[3*N//4] = 1.0
+	return sig
+
+
 def signalTwoTone(N):
 	x = numpy.arange(0,N) / N
 	sig = cos(2*pi*N/12*x)*numpy.roll(scipy.signal.gaussian(N,N/4),-N//4) + \
@@ -184,41 +201,12 @@ def signalChirp(N):
 
 
 
-# ****** Main ***********
-from pylab import *; ion()
-import PyGFT as gft
-numpy.set_printoptions(precision=4,suppress=True)
-sig = signalTwoTone(N = 256)
-demo1(sig)
-demoWindows(sig)
 
-
-
-# 2D
-N = 256
-sig = numpy.zeros((N,N),dtype=numpy.complex64); sig[N//2,N//2] = 1.0
-
-# Standard 2D GFT
-partitions = GFTPartitions.dyadicPartitions(N)
-for r in range(sig.shape[0]):
-	sig[r,:] = fft(sig[r,:])
-	for p in range(len(partitions)-1):
-		sig[r,partitions[p]:partitions[p+1]] = numpy.fft.ifft(sig[r,partitions[p]:partitions[p+1]])
-for c in range(sig.shape[1]):
-	sig[:,c] = fft(sig[:,c])
-	for p in range(len(partitions)-1):
-		sig[partitions[p]:partitions[p+1],c] = numpy.fft.ifft(sig[partitions[p]:partitions[p+1],c])
-
-figure('Standard',clear=True);
-_ = [axvline(p / (N-1) * N,0,1,color='r',alpha=0.5,linestyle='--') for p in partitions]
-_ = [axhline(p / (N-1) * N,0,1,color='r',alpha=0.5,linestyle='--') for p in partitions]
-imshow(sig.real)
-
-
-# Nonstandard 2D GFT
-sig = numpy.zeros((N,N),dtype=numpy.complex64); sig[N//2,N//2] = 1.0
-partitions = GFTPartitions.dyadicPartitions(N)
-
-
-
+if __name__ == '__main__':
+	from pylab import *; ion()
+	numpy.set_printoptions(precision=4,suppress=True)
+	sig = signalDoubleDelta(N = 512)
+	demo1(sig,windowShape='boxcar',interpolation='linear')
+	demo1(sig,windowShape='gaussian',interpolation='linear')
+	demoWindows(sig)
 
