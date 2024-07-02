@@ -2,6 +2,9 @@ import numpy, scipy.interpolate, scipy.signal
 
 from numpy.fft import fft, ifft, fftn, ifftn
 
+gaussian = scipy.signal.windows.gaussian
+
+
 class GFTPartitions(object):
 	""" Superclass for GFT window sets. Implements generic boxcar octave windows."""
 	
@@ -30,7 +33,7 @@ class GFTPartitions(object):
 		widths = GFTPartitions.widths(N,partitions)
 		for p in range(len(partitions)):
 			windows[partitions[p]:partitions[p]+widths[p]] = \
-				scipy.signal.gaussian(widths[p],widths[p]*sigma,sym=symmetric)
+				gaussian(widths[p],widths[p]*sigma,sym=symmetric)
 			windows[partitions[p]:partitions[p]+widths[p]] /= sum(windows[partitions[p]:partitions[p]+widths[p]]) / widths[p] 
 		return windows
 	
@@ -193,8 +196,8 @@ def signalDoubleDelta(N):
 
 def signalTwoTone(N):
 	x = numpy.arange(0,N) / N
-	sig = numpy.cos(2*pi*N/12*x)*numpy.roll(scipy.signal.gaussian(N,N/4),-N//4) + \
-			numpy.cos(2*pi*N/6*x)*numpy.roll(scipy.signal.gaussian(N,N/4),N//4)
+	sig = numpy.cos(2*pi*N/12*x)*numpy.roll(gaussian(N,N/4),-N//4) + \
+			numpy.cos(2*pi*N/6*x)*numpy.roll(gaussian(N,N/4),N//4)
 	return sig
 
 def signalChirp(N):
