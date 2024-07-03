@@ -3,6 +3,7 @@ import numpy, scipy.interpolate, scipy.signal
 from numpy.fft import fft, ifft, fftn, ifftn
 
 gaussian = scipy.signal.windows.gaussian
+pi = numpy.pi
 
 
 class GFTPartitions(object):
