@@ -1,10 +1,13 @@
-import numpy, scipy.interpolate, scipy.signal
+import numpy, scipy.interpolate, scipy.signal, numbers
 
 from numpy.fft import fft, ifft, fftn, ifftn
 
 gaussian = scipy.signal.windows.gaussian
 pi = numpy.pi
 
+# TODO: indexer and maybe interpolation functions need to be adjusted so they range from
+# frequency indices 0:N/2,-N/2:0 rather than -N/2:0:N/2
+# change interpolator so it takes - to + indices and adds N/2?
 
 class GFTPartitions(object):
 	""" Superclass for GFT window sets. Implements generic boxcar octave windows."""
@@ -17,8 +20,17 @@ class GFTPartitions(object):
 	
 	@classmethod
 	def dyadicPartitions(self,N):
+		if N < 2:
+			raise Exception('Cannot create dyadic partitions for signals < 2 samples.')
+		# effectively rounds N to the nearest power of 2.
 		widths = (2**numpy.arange(numpy.round(numpy.log(N)/numpy.log(2))-1)).astype(numpy.uint32)
-		widths = numpy.concatenate([[1],widths,widths[::-1]])		
+		middle = len(widths)
+		widths = numpy.concatenate([[1],widths,widths[::-1]])
+		# If N is not a power of two then add or subtract the extra points from the highest frequency band
+		extra = int(N - 2**numpy.round(numpy.log(N)/numpy.log(2)))
+		if not (extra == 0):
+			widths[middle] += extra // 2
+			widths[middle+1] += extra - extra//2
 		partitions = numpy.concatenate([[0],numpy.cumsum(widths)])
 		return partitions
 	
@@ -72,24 +84,32 @@ class GFT(object):
 			SIG[partitions[p]:partitions[p+1]] = numpy.fft.fft(SIG[partitions[p]:partitions[p+1]])
 		SIG /= windows
 		return numpy.fft.ifft(SIG)
-
-	def interpolate(SIG,partitions,M=None,axes=None,kind='linear',**args):
+		
+	@classmethod
+	def interpolate(self,SIG,partitions,M=None,axes=None,kind='linear',**args):
 		""" Interpolate a 1D GFT onto a grid. If axes is specified it should be a
 			list or tuple consisting of two arrays, the sampling points on the time and frequency
 			axes, respectively. Alternatively, M can be specified, which gives the number
-			of points along each axis."""
+			of points along each axis. Indexing is [time,frequency]"""
 		N = len(SIG)
 		M = M if not M is None else N
 		factor = N / M
 		axes = [numpy.arange(0,N,factor),numpy.arange(0,N,factor)] if axes is None else axes
+		
+		# Roll indices so our actual indexing of -N/2 - 0 - N/2 looks like 0 - N for the
+		# interpolator
+		#axes[1] -= N/2
+		
 		newT = axes[0]		# New t axis
 		widths = GFTPartitions.widths(N,partitions)
 		spectrogramM = []
 		spectrogramP = []
+		extra = 3 if kind=='cubic' else 1
 		# interpolate each frequency band in time
+		# TODO: make this more efficient by only computing the bands we need
 		for p in range(len(partitions)):
-			# indices of sample points, plus 3 extra on each side in case of cubic interpolation
-			indices = (numpy.arange(-3,widths[p]+3))
+			# indices of sample points, plus extra points on each side depending on order of interpolation
+			indices = (numpy.arange(-extra,widths[p]+extra))
 			# time coordinates of samples
 			t = indices * (N/widths[p])
 			# values at sample points; indices can index multiple times into SIG[]
@@ -102,21 +122,141 @@ class GFT(object):
 		
 		# Interpolate in frequency
 		newF = axes[1]		# New f axis
-		indices = numpy.arange(-3,len(partitions)+3) % len(partitions)
-		f = partitions[indices] + widths[indices]/2; f[0:3] -= N; f[-3:] += N
+		indices = numpy.arange(-extra,len(partitions)+extra) % len(partitions)
+		f = partitions[indices] + widths[indices]/2;
+		if extra > 0:
+			f[0:extra] -= N; f[-extra:] += N
 		spectrogramM = scipy.interpolate.interp1d(f,abs(spectrogramM[indices]),axis=0,kind=kind,**args)(newF)
 		#spectrogram = spectrogramM * (cos(spectrogramP) + 1j*sin(spectrogramP))
 		spectrogramP = scipy.interpolate.interp1d(f,spectrogramP[indices],axis=0,kind=kind,**args)(newF)
 		spectrogram = spectrogramM * (numpy.cos(numpy.angle(spectrogramP)) + 1j*numpy.sin(numpy.angle(spectrogramP)))
 		return spectrogram
-
-
-class GFTND(object):
-	""" N dimensional GFT. Work in progress."""
 	
-	@classmethod
-	def transform(self,signal,windows,partitions):
-		pass
+	def __init__(self,N=None,signal=None,partitions=None,windows=None,sampleRate=None,interpolation='nearest'):
+		""" 
+		If sampleRate is None, indexing will be by sample number in both t and f.
+		"""
+		self.N = N = N if not N is None else len(signal) if not signal is None else None
+		self.signal = signal
+		self.partitions = partitions
+		self.windows = windows
+		self.sampleRate = sampleRate
+		self.interpolation = interpolation
+		self.SIG = None
+		if not ((self.signal is None) or (self.partitions is None) or (self.windows is None)):
+			self.SIG = self.transform(signal=self.signal,windows=self.windows,partitions=self.partitions)
+		if not self.partitions is None and not self.sampleRate is None:
+			p = numpy.array([i if (i < N/2) else -(N/2-(i-N/2)) for i in self.partitions])
+			self.partitionsf = p * 1./self.sampleRate
+			
+	
+	def partitionFromf(self,f):
+		""" Given a frequency, figure out the index of the band it's in"""
+		N = self.N
+		f2 = numpy.array(f).reshape((-1))
+		if not self.sampleRate is None:
+			f2 = f2 * self.sampleRate / N
+		f2 = numpy.array([i if (i >= 0) else i+N for i in f2])
+		indices = numpy.searchsorted(self.partitions, f2+0.00000001, side="left")-1
+		if not hasattr(f,'__len__'):
+			return indices[0]
+		else:
+			return indices
+	
+	def sampleIndexFromt(self,t):
+		""" Given a time coordinate, figure out the index of the sample """
+		N = self.N
+		t2 = numpy.array(t).reshape((-1))
+		if not self.sampleRate is None:
+			t2 = t2 * self.sampleRate
+		if not hasattr(t,'__len__'):
+			return t2[0]
+		else:
+			return t2
+		
+	def sampleIndexFromf(self,f):
+		""" Given a frequency coordinate, figure out the index of the sample """
+		N = self.N
+		f2 = numpy.array(f).reshape((-1))
+		if not self.sampleRate is None:
+			f2 = f2 * self.sampleRate / N
+		if not hasattr(f,'__len__'):
+			return f2[0]
+		else:
+			return f2
+			
+	
+	def tCoordinates(self,f):
+		""" Given a frequency, get the coordinates of the middle of each time sample"""
+		N = self.N
+		f = self.partitionFromf(f)
+		widths = GFTPartitions.widths(self.N,self.partitions)
+		indices = numpy.arange(widths[f])
+		t = indices * (self.N/widths[f])
+		if not self.sampleRate is None:
+			 t = t / self.sampleRate
+		return t
+		
+	def fCoordinates(self):
+		""" Get the frequency (f) coordinates of the middle of each frequency sample """
+		N = self.N
+		if self.partitions is None:
+			return None
+		else:
+			widths = GFTPartitions.widths(self.N,self.partitions)
+			indices = numpy.arange(len(self.partitions)) % len(self.partitions)
+			f = self.partitions[indices]
+			f = numpy.array([i if (i < N/2) else -(N/2-(i-N/2)) for i in f])
+			fc = f + widths[indices]/2
+			if not self.sampleRate is None:
+				fc = fc * N/self.sampleRate
+			return fc
+	
+	
+	def __getitem__(self,key):
+		""" 'Slicing'. Frequency first, time second. """
+		interpArgs = dict(SIG=self.SIG,partitions=self.partitions,kind=self.interpolation)
+		axes = None
+		N = len(self.SIG)
+		# Handle sigle index
+		if (not hasattr(key,'__len__')):
+			key = [key,slice(None)]
+		if (len(key) == 1):
+			key = [key[0],slice(None)]
+		
+		fi = key[0]; ti = key[1]
+		# Convert scalar or slice coordinates into array
+		if isinstance(fi,numbers.Number):
+			fi = [fi]
+		elif isinstance(fi,slice):
+			args = {}
+			sampleSize = (N/self.sampleRate) if not self.sampleRate is None else 1.
+			args['start'] = fi.start if not fi.start is None else -N/2 * sampleSize
+			args['stop'] = fi.stop if not fi.stop is None else N/2 * sampleSize
+			args['step'] = fi.step if not fi.step is None else sampleSize				
+			fi = numpy.arange(**args)
+		if isinstance(ti,numbers.Number):
+			ti = [ti]
+		elif isinstance(ti,slice):
+			args = {}
+			sampleSize = (1./self.sampleRate) if not self.sampleRate is None else 1.
+			maxSample = N / self.sampleRate if not self.sampleRate is None else N
+			args['start'] = ti.start if not ti.start is None else 0
+			args['stop'] = ti.stop if not ti.stop is None else maxSample
+			args['step'] = ti.step if not ti.step is None else sampleSize
+			ti = numpy.arange(**args)
+		
+		# convert coordinates to indices (N-based, not partitions)
+		fi = (self.sampleIndexFromf(fi) + (N+1)) % N
+		ti = self.sampleIndexFromt(ti)
+		
+		# use interpolate to generate our value(s)
+		axes = [ti,fi]
+		result = self.interpolate(axes=axes,**interpArgs)
+		if isinstance(key[0],numbers.Number) and isinstance(key[1],numbers.Number):
+			# our coordinates were both scalar so we should return a scalar
+			result = result[0,0]
+		return result
 
 
 
