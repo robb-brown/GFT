@@ -15,23 +15,21 @@ print(numpy.all((numpy.array(ns) - numpy.array(success)) == 1))
 
 
 N = 2000
-sig = signalChirp(N)+1
+sig = signalChirp(N)+1./N
 partitions = GFTPartitions.dyadicPartitions(N)
 windows = GFTPartitions.boxcarWindows(N,partitions)
 
-gft = GFT(signal=sig,partitions=partitions,windows=windows,sampleRate=None)
+gft = GFT(signal=sig,partitions=partitions,windows=windows,sampleRate=N)
 self = gft
 
+s = gft[0:256,0.:1.]
 
-spectrogram = GFT.interpolate(SIG=gft.SIG,partitions=gft.partitions,kind='nearest')
+figure('test',clear=True)
+imshow(numpy.abs(s),origin='lower');
 
-s = gft[:]
 
 
-demo1(sig,windowShape='boxcar',interpolation='nearest')
-figure('test')
-s = gft[:]; 
-clf(); imshow(log(abs(s)),origin='lower'); axhline(abs(s).argmax(axis=0)[0],color='r'); 
+
 print(s.argmax(axis=0)[0])
 
 

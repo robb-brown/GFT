@@ -226,6 +226,7 @@ class GFT(object):
 		
 		fi = key[0]; ti = key[1]
 		# Convert scalar or slice coordinates into array
+		import pudb; pu.db
 		if isinstance(fi,numbers.Number):
 			fi = [fi]
 		elif isinstance(fi,slice):
