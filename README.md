@@ -8,6 +8,9 @@ construction; boxcar and Gaussian windows; and interpolation to create a display
 spectrum. Customized window layouts and windows are fairly easily constructed by
 following the example of the existing dyadic/Gaussian ones.
 
+Note that the Gaussian window construction function adopts the numpy convention where
+sigma indicates the width of the window relative to the array length. Although the function takes a single sigma, this results in varying window widths because the widths of the partitions varies (see demo).
+
 TODO:
 
 - demo/tutorial of creating custom windows, especially for musical scales
